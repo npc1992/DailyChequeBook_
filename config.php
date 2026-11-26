@@ -1,16 +1,23 @@
 <?php
 /**
- * Calendar Day Entry & Daily Sum Tracker - Google Sheet Sole Database Config
+ * Calendar Day Entry & Daily Sum Tracker - PHP Configuration & Google Sheet DB Connector
  *
- * Google Sheet is the sole database for entries, daily sum totals, and settings.
- * Connects to your Google Apps Script Web App URL.
+ * Place this file in the same root folder as index.html.
+ * Set your default Google Apps Script Web App URL in TRACKER_CONFIG_DATA['sheetDbConfig']['webhookUrl']
+ * or save it directly from the app's Google Sheet DB panel (persisted to config.override.json & config.php).
  */
 
-declare(strict_types=1);
-
 const TRACKER_CONFIG_DATA = [
-  'schemaVersion' => '2.0',
-  'updatedAt' => '2026-11-26T00:59:46+00:00',
+  'schemaVersion' => '2.1',
+  'updatedAt' => '2026-11-26T01:57:33+00:00',
+  'currency' => 'INR',
+  'branding' => [
+    'title' => 'Calendar Day Entry & Daily Sum Tracker',
+    'subtitle' => 'Track daily bills & cheques with automatic separate daily sum totals',
+    'footerText' => 'Calendar Day Entry & Daily Sum Tracker • Google Sheet database sync',
+    'logoUrl' => '',
+    'faviconValue' => '',
+  ],
   'sheetDbConfig' => [
     'driver' => 'google_sheet',
     'webhookUrl' => 'https://script.google.com/macros/s/AKfycbyQK-fK_9sXNaSxBJjZb_xK3GdrhFhzxsf7n_ARg9gYvOzyirPf4wvJe5DwS4JLZeHA/exec',
@@ -18,104 +25,136 @@ const TRACKER_CONFIG_DATA = [
     'settingsSheetName' => 'Data settings',
     'defaultLoadOnStart' => true,
     'autoSync' => true,
-    'lastSyncAt' => '06:29:46 AM',
+    'lastSyncAt' => '07:27:33 AM',
   ],
 ];
 
 /**
- * Default fallback Google Sheet connection config.
+ * Returns the path to the JSON override file in the same directory as config.php.
  */
-function defaultTrackerConfig(): array
+function getOverrideConfigPath(): string
 {
-    $envUrl = trim((string) (getenv('GOOGLE_SHEET_WEBAPP_URL') ?: ($_ENV['GOOGLE_SHEET_WEBAPP_URL'] ?? '')));
-    if ($envUrl !== '' && !preg_match('#^https?://#i', $envUrl)) {
-        $envUrl = '';
-    }
-
-    return [
-        'schemaVersion' => '2.0',
-        'updatedAt' => gmdate('c'),
-        'sheetDbConfig' => [
-            'driver' => 'google_sheet',
-            'webhookUrl' => $envUrl,
-            'entriesSheetName' => 'Entries',
-            'settingsSheetName' => 'Data settings',
-            'defaultLoadOnStart' => true,
-            'autoSync' => true,
-            'lastSyncAt' => '',
-        ],
-    ];
+    return __DIR__ . DIRECTORY_SEPARATOR . 'config.override.json';
 }
 
 /**
- * Loads the default Google Sheet DB configuration from TRACKER_CONFIG_DATA,
- * applying optional environment/JSON overrides when present.
+ * Loads the default Google Sheet DB configuration merged with any saved config.override.json.
  */
 function loadDefaultGoogleSheetDbConfig(): array
 {
-    $defaults = defaultTrackerConfig();
-    $config = normalizeTrackerConfig(TRACKER_CONFIG_DATA, $defaults);
+    $config = TRACKER_CONFIG_DATA;
+    $overridePath = getOverrideConfigPath();
 
-    $overrideFile = __DIR__ . '/config.sheet.json';
-    if (is_readable($overrideFile)) {
-        $rawOverride = @file_get_contents($overrideFile);
-        if (is_string($rawOverride) && trim($rawOverride) !== '') {
-            $decoded = json_decode($rawOverride, true);
+    if (is_file($overridePath) && is_readable($overridePath)) {
+        $raw = @file_get_contents($overridePath);
+        if (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
             if (is_array($decoded)) {
                 $config = normalizeTrackerConfig($decoded, $config);
             }
         }
     }
 
+    $resolvedUrl = resolveConfiguredWebAppUrl($config);
+    $config['sheetDbConfig']['webhookUrl'] = $resolvedUrl;
+    $config['sheetDbConfig']['defaultLoadOnStart'] = true;
+
     return $config;
 }
 
 /**
- * Normalizes and validates incoming Google Sheet connection settings.
+ * Normalizes incoming configuration payloads against the baseline schema.
  */
-function normalizeTrackerConfig($raw, array $fallback): array
+function normalizeTrackerConfig(array $incoming, array $baseConfig = TRACKER_CONFIG_DATA): array
 {
-    if (!is_array($raw)) {
-        return $fallback;
+    $source = isset($incoming['settings']) && is_array($incoming['settings'])
+        ? $incoming['settings']
+        : $incoming;
+
+    $result = $baseConfig;
+    $result['updatedAt'] = gmdate('c');
+
+    if (!empty($source['currency']) && is_string($source['currency'])) {
+        $curr = strtoupper(trim($source['currency']));
+        if (in_array($curr, ['INR', 'USD', 'EUR', 'GBP'], true)) {
+            $result['currency'] = $curr;
+        }
     }
 
-    $source = (isset($raw['settings']) && is_array($raw['settings'])) ? $raw['settings'] : $raw;
-    $sheetIn = (isset($source['sheetDbConfig']) && is_array($source['sheetDbConfig']))
+    if (isset($source['branding']) && is_array($source['branding'])) {
+        $b = $source['branding'];
+        if (isset($b['title']) && trim((string) $b['title']) !== '') {
+            $result['branding']['title'] = trim((string) $b['title']);
+        }
+        if (array_key_exists('subtitle', $b)) {
+            $result['branding']['subtitle'] = (string) $b['subtitle'];
+        }
+        if (isset($b['footerText']) && trim((string) $b['footerText']) !== '') {
+            $result['branding']['footerText'] = trim((string) $b['footerText']);
+        }
+        if (array_key_exists('logoUrl', $b)) {
+            $result['branding']['logoUrl'] = trim((string) $b['logoUrl']);
+        }
+        if (array_key_exists('faviconValue', $b)) {
+            $result['branding']['faviconValue'] = trim((string) $b['faviconValue']);
+        }
+    }
+
+    $incomingSheet = isset($source['sheetDbConfig']) && is_array($source['sheetDbConfig'])
         ? $source['sheetDbConfig']
-        : $source;
+        : [];
 
-    $webhookUrl = trim((string) ($sheetIn['webhookUrl'] ?? ($fallback['sheetDbConfig']['webhookUrl'] ?? '')));
-    if ($webhookUrl !== '' && !preg_match('#^https?://#i', $webhookUrl)) {
-        $webhookUrl = '';
+    $urlCandidate = resolveConfiguredWebAppUrl(array_merge($source, ['sheetDbConfig' => $incomingSheet]));
+    if ($urlCandidate !== '' || array_key_exists('webhookUrl', $incomingSheet) || array_key_exists('webAppUrl', $source)) {
+        $result['sheetDbConfig']['webhookUrl'] = $urlCandidate;
     }
 
-    $settingsSheetName = trim((string) ($sheetIn['settingsSheetName'] ?? ($fallback['sheetDbConfig']['settingsSheetName'] ?? 'Data settings')));
-    if ($settingsSheetName === '') {
-        $settingsSheetName = 'Data settings';
+    if (!empty($incomingSheet['entriesSheetName'])) {
+        $result['sheetDbConfig']['entriesSheetName'] = trim((string) $incomingSheet['entriesSheetName']);
     }
-
-    $entriesSheetName = trim((string) ($sheetIn['entriesSheetName'] ?? ($fallback['sheetDbConfig']['entriesSheetName'] ?? 'Entries')));
-    if ($entriesSheetName === '') {
-        $entriesSheetName = 'Entries';
+    if (!empty($incomingSheet['settingsSheetName'])) {
+        $result['sheetDbConfig']['settingsSheetName'] = trim((string) $incomingSheet['settingsSheetName']);
     }
+    if (array_key_exists('autoSync', $incomingSheet)) {
+        $result['sheetDbConfig']['autoSync'] = (bool) $incomingSheet['autoSync'];
+    }
+    if (array_key_exists('lastSyncAt', $incomingSheet)) {
+        $result['sheetDbConfig']['lastSyncAt'] = trim((string) $incomingSheet['lastSyncAt']);
+    }
+    $result['sheetDbConfig']['driver'] = 'google_sheet';
+    $result['sheetDbConfig']['defaultLoadOnStart'] = true;
 
-    return [
-        'schemaVersion' => '2.0',
-        'updatedAt' => gmdate('c'),
-        'sheetDbConfig' => [
-            'driver' => 'google_sheet',
-            'webhookUrl' => $webhookUrl,
-            'entriesSheetName' => $entriesSheetName,
-            'settingsSheetName' => $settingsSheetName,
-            'defaultLoadOnStart' => isset($sheetIn['defaultLoadOnStart'])
-                ? (bool) $sheetIn['defaultLoadOnStart']
-                : (bool) ($fallback['sheetDbConfig']['defaultLoadOnStart'] ?? true),
-            'autoSync' => isset($sheetIn['autoSync'])
-                ? (bool) $sheetIn['autoSync']
-                : (bool) ($fallback['sheetDbConfig']['autoSync'] ?? true),
-            'lastSyncAt' => trim((string) ($sheetIn['lastSyncAt'] ?? ($fallback['sheetDbConfig']['lastSyncAt'] ?? ''))),
-        ],
+    return $result;
+}
+
+/**
+ * Extracts a valid HTTP/HTTPS Web App URL from nested config structures or environment variables.
+ */
+function resolveConfiguredWebAppUrl(array $config): string
+{
+    $candidates = [
+        $config['sheetDbConfig']['webhookUrl'] ?? '',
+        $config['sheetDbConfig']['webAppUrl'] ?? '',
+        $config['sheetDbConfig']['googleAppScriptUrl'] ?? '',
+        $config['googleAppScriptUrl'] ?? '',
+        $config['googleAppsScriptUrl'] ?? '',
+        $config['webAppUrl'] ?? '',
+        $config['webhookUrl'] ?? '',
+        $config['scriptUrl'] ?? '',
+        $config['branding']['webhookUrl'] ?? '',
+        $config['branding']['webAppUrl'] ?? '',
+        getenv('GOOGLE_SHEET_WEBAPP_URL') ?: '',
+        $_ENV['GOOGLE_SHEET_WEBAPP_URL'] ?? '',
     ];
+
+    foreach ($candidates as $candidate) {
+        $url = trim((string) $candidate);
+        if ($url !== '' && preg_match('#^https?://#i', $url)) {
+            return $url;
+        }
+    }
+
+    return '';
 }
 
 /**
@@ -156,6 +195,23 @@ function writeConfigIntoConfigPhp(string $selfPath, array $config): bool
     return @file_put_contents($selfPath, $updatedCode, LOCK_EX) !== false;
 }
 
+/**
+ * Saves configuration to config.override.json and updates TRACKER_CONFIG_DATA in config.php.
+ */
+function saveConfigOverrideAndPhp(array $config): array
+{
+    $overridePath = getOverrideConfigPath();
+    $jsonEncoded = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $overrideSaved = $jsonEncoded !== false && @file_put_contents($overridePath, $jsonEncoded, LOCK_EX) !== false;
+    $phpSaved = writeConfigIntoConfigPhp(__FILE__, $config);
+
+    return [
+        'saved' => $overrideSaved || $phpSaved,
+        'overrideSaved' => $overrideSaved,
+        'phpSaved' => $phpSaved,
+    ];
+}
+
 // Serve HTTP JSON API when accessed directly via browser/fetch
 if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
     header('Content-Type: application/json; charset=utf-8');
@@ -166,11 +222,26 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
         $currentConfig = loadDefaultGoogleSheetDbConfig();
 
         if ($method === 'GET') {
+            $webAppUrl = resolveConfiguredWebAppUrl($currentConfig);
+            $currentConfig['sheetDbConfig']['webhookUrl'] = $webAppUrl;
+            $currentConfig['sheetDbConfig']['defaultLoadOnStart'] = true;
+
             echo json_encode([
                 'ok' => true,
                 'source' => 'config.php',
                 'defaultDb' => 'google_sheet',
+                'googleAppScriptUrl' => $webAppUrl,
+                'webAppUrl' => $webAppUrl,
+                'webhookUrl' => $webAppUrl,
+                'hasWebAppUrl' => $webAppUrl !== '',
                 'settings' => $currentConfig,
+                'config' => $currentConfig,
+                'data' => [
+                    'googleAppScriptUrl' => $webAppUrl,
+                    'webAppUrl' => $webAppUrl,
+                    'webhookUrl' => $webAppUrl,
+                    'settings' => $currentConfig,
+                ],
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             exit;
         }
@@ -185,20 +256,23 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
             }
 
             $normalized = normalizeTrackerConfig($payload, $currentConfig);
-            $saved = writeConfigIntoConfigPhp(__FILE__, $normalized);
+            $saveResult = saveConfigOverrideAndPhp($normalized);
 
-            if (!$saved) {
+            if (!$saveResult['saved']) {
                 http_response_code(500);
                 echo json_encode([
                     'ok' => false,
-                    'error' => 'Unable to write Google Sheet URL config into config.php. Check file permissions.',
+                    'error' => 'Unable to save configuration to config.override.json or config.php. Check folder/file permissions.',
                 ]);
                 exit;
             }
 
             echo json_encode([
                 'ok' => true,
-                'message' => 'Google Sheet DB URL saved to config.php',
+                'message' => $saveResult['overrideSaved']
+                    ? 'Google Sheet DB & branding configuration saved to config.override.json'
+                    : 'Google Sheet DB & branding configuration saved to config.php',
+                'overrideFile' => 'config.override.json',
                 'settings' => $normalized,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             exit;

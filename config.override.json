@@ -1,0 +1,21 @@
+{
+    "schemaVersion": "2.1",
+    "updatedAt": "2026-11-26T01:57:33+00:00",
+    "currency": "INR",
+    "branding": {
+        "title": "Calendar Day Entry & Daily Sum Tracker",
+        "subtitle": "Track daily bills & cheques with automatic separate daily sum totals",
+        "footerText": "Calendar Day Entry & Daily Sum Tracker • Google Sheet database sync",
+        "logoUrl": "",
+        "faviconValue": ""
+    },
+    "sheetDbConfig": {
+        "driver": "google_sheet",
+        "webhookUrl": "https://script.google.com/macros/s/AKfycbyQK-fK_9sXNaSxBJjZb_xK3GdrhFhzxsf7n_ARg9gYvOzyirPf4wvJe5DwS4JLZeHA/exec",
+        "entriesSheetName": "Entries",
+        "settingsSheetName": "Data settings",
+        "defaultLoadOnStart": true,
+        "autoSync": true,
+        "lastSyncAt": "07:27:33 AM"
+    }
+}
