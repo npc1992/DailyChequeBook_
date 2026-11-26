@@ -1,23 +1,24 @@
 <?php
 /**
- * Calendar Day Entry & Daily Sum Tracker - Google Sheet Database Config
+ * Calendar Day Entry & Daily Sum Tracker - Google Sheet Sole Database Config
  *
+ * Google Sheet is the sole database for entries, daily sum totals, and settings.
  * Connects to your Google Apps Script Web App URL.
- * All application settings (title, logo, favicon, highlight thresholds, currency)
- * are stored in and pulled from the "Data settings" tab in your Google Sheet.
  */
 
 declare(strict_types=1);
 
 const TRACKER_CONFIG_DATA = [
   'schemaVersion' => '2.0',
-  'updatedAt' => '2026-11-26T00:51:13+00:00',
+  'updatedAt' => '2026-11-26T00:59:46+00:00',
   'sheetDbConfig' => [
     'driver' => 'google_sheet',
     'webhookUrl' => 'https://script.google.com/macros/s/AKfycbyQK-fK_9sXNaSxBJjZb_xK3GdrhFhzxsf7n_ARg9gYvOzyirPf4wvJe5DwS4JLZeHA/exec',
+    'entriesSheetName' => 'Entries',
     'settingsSheetName' => 'Data settings',
+    'defaultLoadOnStart' => true,
     'autoSync' => true,
-    'lastSyncAt' => '06:21:13 AM',
+    'lastSyncAt' => '06:29:46 AM',
   ],
 ];
 
@@ -26,17 +27,47 @@ const TRACKER_CONFIG_DATA = [
  */
 function defaultTrackerConfig(): array
 {
+    $envUrl = trim((string) (getenv('GOOGLE_SHEET_WEBAPP_URL') ?: ($_ENV['GOOGLE_SHEET_WEBAPP_URL'] ?? '')));
+    if ($envUrl !== '' && !preg_match('#^https?://#i', $envUrl)) {
+        $envUrl = '';
+    }
+
     return [
         'schemaVersion' => '2.0',
         'updatedAt' => gmdate('c'),
         'sheetDbConfig' => [
             'driver' => 'google_sheet',
-            'webhookUrl' => '',
+            'webhookUrl' => $envUrl,
+            'entriesSheetName' => 'Entries',
             'settingsSheetName' => 'Data settings',
+            'defaultLoadOnStart' => true,
             'autoSync' => true,
             'lastSyncAt' => '',
         ],
     ];
+}
+
+/**
+ * Loads the default Google Sheet DB configuration from TRACKER_CONFIG_DATA,
+ * applying optional environment/JSON overrides when present.
+ */
+function loadDefaultGoogleSheetDbConfig(): array
+{
+    $defaults = defaultTrackerConfig();
+    $config = normalizeTrackerConfig(TRACKER_CONFIG_DATA, $defaults);
+
+    $overrideFile = __DIR__ . '/config.sheet.json';
+    if (is_readable($overrideFile)) {
+        $rawOverride = @file_get_contents($overrideFile);
+        if (is_string($rawOverride) && trim($rawOverride) !== '') {
+            $decoded = json_decode($rawOverride, true);
+            if (is_array($decoded)) {
+                $config = normalizeTrackerConfig($decoded, $config);
+            }
+        }
+    }
+
+    return $config;
 }
 
 /**
@@ -63,13 +94,22 @@ function normalizeTrackerConfig($raw, array $fallback): array
         $settingsSheetName = 'Data settings';
     }
 
+    $entriesSheetName = trim((string) ($sheetIn['entriesSheetName'] ?? ($fallback['sheetDbConfig']['entriesSheetName'] ?? 'Entries')));
+    if ($entriesSheetName === '') {
+        $entriesSheetName = 'Entries';
+    }
+
     return [
         'schemaVersion' => '2.0',
         'updatedAt' => gmdate('c'),
         'sheetDbConfig' => [
             'driver' => 'google_sheet',
             'webhookUrl' => $webhookUrl,
+            'entriesSheetName' => $entriesSheetName,
             'settingsSheetName' => $settingsSheetName,
+            'defaultLoadOnStart' => isset($sheetIn['defaultLoadOnStart'])
+                ? (bool) $sheetIn['defaultLoadOnStart']
+                : (bool) ($fallback['sheetDbConfig']['defaultLoadOnStart'] ?? true),
             'autoSync' => isset($sheetIn['autoSync'])
                 ? (bool) $sheetIn['autoSync']
                 : (bool) ($fallback['sheetDbConfig']['autoSync'] ?? true),
@@ -123,13 +163,13 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
 
     try {
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-        $defaults = defaultTrackerConfig();
-        $currentConfig = normalizeTrackerConfig(TRACKER_CONFIG_DATA, $defaults);
+        $currentConfig = loadDefaultGoogleSheetDbConfig();
 
         if ($method === 'GET') {
             echo json_encode([
                 'ok' => true,
                 'source' => 'config.php',
+                'defaultDb' => 'google_sheet',
                 'settings' => $currentConfig,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             exit;

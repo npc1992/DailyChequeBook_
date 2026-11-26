@@ -1795,7 +1795,9 @@
       let sheetDbConfig = {
         driver: 'google_sheet',
         webhookUrl: '',
+        entriesSheetName: 'Entries',
         settingsSheetName: 'Data settings',
+        defaultLoadOnStart: true,
         autoSync: true,
         lastSyncAt: '',
       };
@@ -2453,7 +2455,12 @@
           sheetDbConfig = {
             driver: 'google_sheet',
             webhookUrl: String(source.sheetDbConfig.webhookUrl || '').trim(),
+            entriesSheetName: String(source.sheetDbConfig.entriesSheetName || 'Entries'),
             settingsSheetName: String(source.sheetDbConfig.settingsSheetName || 'Data settings'),
+            defaultLoadOnStart:
+              source.sheetDbConfig.defaultLoadOnStart !== undefined
+                ? Boolean(source.sheetDbConfig.defaultLoadOnStart)
+                : true,
             autoSync:
               source.sheetDbConfig.autoSync !== undefined ? Boolean(source.sheetDbConfig.autoSync) : true,
             lastSyncAt: String(source.sheetDbConfig.lastSyncAt || ''),
@@ -2581,12 +2588,17 @@
           applySettingsDocument(phpDoc);
         }
 
-        if (sheetDbConfig.webhookUrl) {
+        const shouldAutoLoadSheet =
+          Boolean(sheetDbConfig.webhookUrl) && sheetDbConfig.defaultLoadOnStart !== false;
+
+        if (shouldAutoLoadSheet) {
           await pullEntriesFromGoogleSheet(true);
         } else {
           entries = [];
           if (dom.storageStatusText) {
-            dom.storageStatusText.textContent = 'DB: Google Sheet disconnected';
+            dom.storageStatusText.textContent = sheetDbConfig.webhookUrl
+              ? 'DB: Google Sheet configured (auto-load paused)'
+              : 'DB: Google Sheet disconnected';
           }
         }
 
